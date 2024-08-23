@@ -1,6 +1,7 @@
 package com.inmemorydb.inmemorydb_app.service;
 
-// src/main/java/com/example/inmemorystore/service/KeyValueStoreService.java
+import org.springframework.scheduling.annotation.Scheduled;
+
 
 import org.springframework.stereotype.Service;
 
@@ -8,8 +9,9 @@ import com.inmemorydb.inmemorydb_app.model.KeyValuePair;
 
 import jakarta.annotation.PostConstruct;
 
-// import javax.annotation.PostConstruct;
+import java.io.*;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.concurrent.ConcurrentHashMap;
@@ -28,6 +30,7 @@ public class KeyValueStoreService {
     @PostConstruct
     public void init() {
         scheduler.scheduleAtFixedRate(this::checkExpiration, 0, 1, TimeUnit.SECONDS);
+        loadData(); // Load data when the service starts
     }
 
     public void create(String key, String value, Instant expirationDate) {
@@ -91,6 +94,43 @@ public class KeyValueStoreService {
         }
     }
 
+    @Scheduled(fixedRate = 60000) // Run every minute
+    public void persistData() {
+        lock.readLock().lock();
+        try {
+            try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream("keyvalue_store.dat"))) {
+                oos.writeObject(new HashMap<>(store));
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
+    private void loadData() {
+        lock.writeLock().lock();
+        try {
+            File file = new File("keyvalue_store.dat");
+            if (file.exists()) {
+                try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(file))) {
+                    Map<String, KeyValuePair> loadedStore = (Map<String, KeyValuePair>) ois.readObject();
+                    store.putAll(loadedStore);
+                    
+                    // Rebuild the expiration heap
+                    for (Map.Entry<String, KeyValuePair> entry : loadedStore.entrySet()) {
+                        if (!entry.getValue().isExpired()) {
+                            expirationHeap.offer(new ExpirationEntry(entry.getKey(), entry.getValue().getExpirationDate()));
+                        }
+                    }
+                } catch (IOException | ClassNotFoundException e) {
+                    e.printStackTrace();
+                }
+            }
+        } finally {
+            lock.writeLock().unlock();
+        }
+    }
     private static class ExpirationEntry implements Comparable<ExpirationEntry> {
         String key;
         Instant expirationDate;

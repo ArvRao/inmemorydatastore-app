@@ -2,9 +2,11 @@
 
 package com.inmemorydb.inmemorydb_app.model;
 
+import java.io.Serializable;
 import java.time.Instant;
 
-public class KeyValuePair {
+public class KeyValuePair implements Serializable {
+    private static final long serialVersionUID = 1L;
     private String key;
     private String value;
     private Instant expirationDate;
