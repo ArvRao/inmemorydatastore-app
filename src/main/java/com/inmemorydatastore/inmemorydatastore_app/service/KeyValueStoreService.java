@@ -1,11 +1,11 @@
-package com.inmemorydb.inmemorydb_app.service;
+package com.inmemorydatastore.inmemorydatastore_app.service;
 
 import org.springframework.scheduling.annotation.Scheduled;
 
 
 import org.springframework.stereotype.Service;
 
-import com.inmemorydb.inmemorydb_app.model.KeyValuePair;
+import com.inmemorydatastore.inmemorydatastore_app.model.KeyValuePair;
 
 import jakarta.annotation.PostConstruct;
 
@@ -108,6 +108,7 @@ public class KeyValueStoreService {
         }
     }
 
+    @SuppressWarnings("unchecked")
     private void loadData() {
         lock.writeLock().lock();
         try {

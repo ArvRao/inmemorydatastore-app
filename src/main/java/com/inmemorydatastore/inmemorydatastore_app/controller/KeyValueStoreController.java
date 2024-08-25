@@ -1,13 +1,11 @@
-package com.inmemorydb.inmemorydb_app.controller;
-
-// src/main/java/com/example/inmemorystore/controller/KeyValueStoreController.java
+package com.inmemorydatastore.inmemorydatastore_app.controller;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import com.inmemorydb.inmemorydb_app.service.KeyValueStoreService;
+import com.inmemorydatastore.inmemorydatastore_app.service.KeyValueStoreService;
 
 import java.time.Instant;
 

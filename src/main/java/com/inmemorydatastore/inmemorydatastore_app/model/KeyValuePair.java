@@ -1,6 +1,4 @@
-// src/main/java/com/example/inmemorystore/model/KeyValuePair.java
-
-package com.inmemorydb.inmemorydb_app.model;
+package com.inmemorydatastore.inmemorydatastore_app.model;
 
 import java.io.Serializable;
 import java.time.Instant;
