@@ -12,6 +12,8 @@ import jakarta.annotation.PostConstruct;
 import java.io.*;
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.PriorityQueue;
 import java.util.concurrent.ConcurrentHashMap;
@@ -78,6 +80,15 @@ public class KeyValueStoreService {
             store.remove(key);
         } finally {
             lock.writeLock().unlock();
+        }
+    }
+
+    public List<String> getAllKeys() {
+        lock.readLock().lock();
+        try {
+            return new ArrayList<>(store.keySet());
+        } finally {
+            lock.readLock().unlock();
         }
     }
 

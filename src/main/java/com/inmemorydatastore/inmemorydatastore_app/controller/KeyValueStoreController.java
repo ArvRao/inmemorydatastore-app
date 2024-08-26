@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.*;
 import com.inmemorydatastore.inmemorydatastore_app.service.KeyValueStoreService;
 
 import java.time.Instant;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/kv")
@@ -42,6 +43,12 @@ public class KeyValueStoreController {
     public ResponseEntity<String> delete(@PathVariable String key) {
         storeService.delete(key);
         return new ResponseEntity<>("Deleted", HttpStatus.OK);
+    }
+
+    @GetMapping("/keys")
+    public ResponseEntity<List<String>> getAllKeys() {
+        List<String> keys = storeService.getAllKeys();
+        return new ResponseEntity<>(keys, HttpStatus.OK);
     }
 
     static class KeyValueRequest {
