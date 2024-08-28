@@ -1,21 +1,18 @@
 package com.inmemorydatastore.inmemorydatastore_app.service;
 
-import org.springframework.scheduling.annotation.Scheduled;
-
-
 import org.springframework.stereotype.Service;
-
+import org.springframework.scheduling.annotation.Scheduled;
 import com.inmemorydatastore.inmemorydatastore_app.model.KeyValuePair;
 
 import jakarta.annotation.PostConstruct;
 
+
 import java.io.*;
+import java.nio.ByteBuffer;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.HashMap;
-import java.util.List;
-import java.util.ArrayList;
-import java.util.Map;
-import java.util.PriorityQueue;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -24,22 +21,33 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 @Service
 public class KeyValueStoreService {
-    private final Map<String, KeyValuePair> store = new ConcurrentHashMap<>();
-    private final PriorityQueue<ExpirationEntry> expirationHeap = new PriorityQueue<>();
+    private final ConsistentHash<String> consistentHash;
+    private final Map<String, Map<String, KeyValuePair>> nodeStores;
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
+    private final PriorityQueue<ExpirationEntry> expirationHeap = new PriorityQueue<>();
+
+    public KeyValueStoreService() {
+        List<String> nodes = Arrays.asList("node1", "node2", "node3"); // Example nodes
+        this.consistentHash = new ConsistentHash<>(new MD5Hash(), 100, nodes);
+        this.nodeStores = new HashMap<>();
+        for (String node : nodes) {
+            nodeStores.put(node, new ConcurrentHashMap<>());
+        }
+    }
 
     @PostConstruct
     public void init() {
         scheduler.scheduleAtFixedRate(this::checkExpiration, 0, 1, TimeUnit.SECONDS);
-        loadData(); // Load data when the service starts
+        loadData();
     }
 
     public void create(String key, String value, Instant expirationDate) {
         lock.writeLock().lock();
         try {
+            String node = consistentHash.get(key);
             KeyValuePair pair = new KeyValuePair(key, value, expirationDate, Instant.now());
-            store.put(key, pair);
+            nodeStores.get(node).put(key, pair);
             expirationHeap.offer(new ExpirationEntry(key, expirationDate));
         } finally {
             lock.writeLock().unlock();
@@ -49,7 +57,8 @@ public class KeyValueStoreService {
     public String read(String key) {
         lock.readLock().lock();
         try {
-            KeyValuePair pair = store.get(key);
+            String node = consistentHash.get(key);
+            KeyValuePair pair = nodeStores.get(node).get(key);
             if (pair != null && !pair.isExpired()) {
                 return pair.getValue();
             }
@@ -62,7 +71,8 @@ public class KeyValueStoreService {
     public void update(String key, String value, Instant expirationDate) {
         lock.writeLock().lock();
         try {
-            KeyValuePair pair = store.get(key);
+            String node = consistentHash.get(key);
+            KeyValuePair pair = nodeStores.get(node).get(key);
             if (pair != null) {
                 pair.setValue(value);
                 pair.setExpirationDate(expirationDate);
@@ -77,7 +87,8 @@ public class KeyValueStoreService {
     public void delete(String key) {
         lock.writeLock().lock();
         try {
-            store.remove(key);
+            String node = consistentHash.get(key);
+            nodeStores.get(node).remove(key);
         } finally {
             lock.writeLock().unlock();
         }
@@ -86,7 +97,11 @@ public class KeyValueStoreService {
     public List<String> getAllKeys() {
         lock.readLock().lock();
         try {
-            return new ArrayList<>(store.keySet());
+            List<String> allKeys = new ArrayList<>();
+            for (Map<String, KeyValuePair> nodeStore : nodeStores.values()) {
+                allKeys.addAll(nodeStore.keySet());
+            }
+            return allKeys;
         } finally {
             lock.readLock().unlock();
         }
@@ -98,7 +113,8 @@ public class KeyValueStoreService {
             Instant now = Instant.now();
             while (!expirationHeap.isEmpty() && expirationHeap.peek().expirationDate.isBefore(now)) {
                 ExpirationEntry entry = expirationHeap.poll();
-                store.remove(entry.key);
+                String node = consistentHash.get(entry.key);
+                nodeStores.get(node).remove(entry.key);
             }
         } finally {
             lock.writeLock().unlock();
@@ -110,7 +126,11 @@ public class KeyValueStoreService {
         lock.readLock().lock();
         try {
             try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream("keyvalue_store.dat"))) {
-                oos.writeObject(new HashMap<>(store));
+                Map<String, KeyValuePair> allData = new HashMap<>();
+                for (Map<String, KeyValuePair> nodeStore : nodeStores.values()) {
+                    allData.putAll(nodeStore);
+                }
+                oos.writeObject(allData);
             } catch (IOException e) {
                 e.printStackTrace();
             }
@@ -119,7 +139,6 @@ public class KeyValueStoreService {
         }
     }
 
-    @SuppressWarnings("unchecked")
     private void loadData() {
         lock.writeLock().lock();
         try {
@@ -127,10 +146,9 @@ public class KeyValueStoreService {
             if (file.exists()) {
                 try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream(file))) {
                     Map<String, KeyValuePair> loadedStore = (Map<String, KeyValuePair>) ois.readObject();
-                    store.putAll(loadedStore);
-                    
-                    // Rebuild the expiration heap
                     for (Map.Entry<String, KeyValuePair> entry : loadedStore.entrySet()) {
+                        String node = consistentHash.get(entry.getKey());
+                        nodeStores.get(node).put(entry.getKey(), entry.getValue());
                         if (!entry.getValue().isExpired()) {
                             expirationHeap.offer(new ExpirationEntry(entry.getKey(), entry.getValue().getExpirationDate()));
                         }
@@ -143,6 +161,7 @@ public class KeyValueStoreService {
             lock.writeLock().unlock();
         }
     }
+
     private static class ExpirationEntry implements Comparable<ExpirationEntry> {
         String key;
         Instant expirationDate;
@@ -156,5 +175,59 @@ public class KeyValueStoreService {
         public int compareTo(ExpirationEntry other) {
             return this.expirationDate.compareTo(other.expirationDate);
         }
+    }
+
+    private static class ConsistentHash<T> {
+        private final HashFunction hashFunction;
+        private final int numberOfReplicas;
+        private final SortedMap<Integer, T> circle = new TreeMap<>();
+
+        public ConsistentHash(HashFunction hashFunction, int numberOfReplicas, Collection<T> nodes) {
+            this.hashFunction = hashFunction;
+            this.numberOfReplicas = numberOfReplicas;
+            for (T node : nodes) {
+                add(node);
+            }
+        }
+
+        public void add(T node) {
+            for (int i = 0; i < numberOfReplicas; i++) {
+                circle.put(hashFunction.hash(node.toString() + i), node);
+            }
+        }
+
+        public void remove(T node) {
+            for (int i = 0; i < numberOfReplicas; i++) {
+                circle.remove(hashFunction.hash(node.toString() + i));
+            }
+        }
+
+        public T get(Object key) {
+            if (circle.isEmpty()) {
+                return null;
+            }
+            int hash = hashFunction.hash(key);
+            if (!circle.containsKey(hash)) {
+                SortedMap<Integer, T> tailMap = circle.tailMap(hash);
+                hash = tailMap.isEmpty() ? circle.firstKey() : tailMap.firstKey();
+            }
+            return circle.get(hash);
+        }
+    }
+
+    private static class MD5Hash implements HashFunction {
+        public int hash(Object key) {
+            try {
+                MessageDigest md = MessageDigest.getInstance("MD5");
+                byte[] bytes = md.digest(key.toString().getBytes());
+                return ByteBuffer.wrap(bytes).getInt();
+            } catch (NoSuchAlgorithmException e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    private interface HashFunction {
+        int hash(Object key);
     }
 }
