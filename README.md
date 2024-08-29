@@ -8,3 +8,5 @@ When a key-value pair is added, the consistent hashing algorithm determines whic
 The consistentHash.get(key) call determines which node should hold the data for that key.
 
 Check Node distribution: return a map showing how many key-value pairs are stored in each node.
+Concept of virtual nodes where each node has associated key-value pair stored in it.
+When key-value pair is added, the consistent hashing algorithm determines which node should store that data based on the hash of the key.
