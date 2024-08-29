@@ -26,9 +26,11 @@ public class KeyValueStoreService {
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(2);
     private final PriorityQueue<ExpirationEntry> expirationHeap = new PriorityQueue<>();
+    private final List<String> nodes;
+
 
     public KeyValueStoreService() {
-        List<String> nodes = Arrays.asList("node1", "node2", "node3"); // Example nodes
+        this.nodes = Arrays.asList("node1", "node2", "node3", "node4");
         this.consistentHash = new ConsistentHash<>(new MD5Hash(), 100, nodes);
         this.nodeStores = new HashMap<>();
         for (String node : nodes) {
@@ -45,9 +47,11 @@ public class KeyValueStoreService {
     public void create(String key, String value, Instant expirationDate) {
         lock.writeLock().lock();
         try {
-            String node = consistentHash.get(key);
+            List<String> responsibleNodes = getResponsibleNodes(key);
             KeyValuePair pair = new KeyValuePair(key, value, expirationDate, Instant.now());
-            nodeStores.get(node).put(key, pair);
+            for (String node : responsibleNodes) {
+                nodeStores.get(node).put(key, pair);
+            }
             expirationHeap.offer(new ExpirationEntry(key, expirationDate));
         } finally {
             lock.writeLock().unlock();
@@ -57,10 +61,12 @@ public class KeyValueStoreService {
     public String read(String key) {
         lock.readLock().lock();
         try {
-            String node = consistentHash.get(key);
-            KeyValuePair pair = nodeStores.get(node).get(key);
-            if (pair != null && !pair.isExpired()) {
-                return pair.getValue();
+            List<String> responsibleNodes = getResponsibleNodes(key);
+            for (String node : responsibleNodes) {
+                KeyValuePair pair = nodeStores.get(node).get(key);
+                if (pair != null && !pair.isExpired()) {
+                    return pair.getValue();
+                }
             }
             return null;
         } finally {
@@ -71,14 +77,12 @@ public class KeyValueStoreService {
     public void update(String key, String value, Instant expirationDate) {
         lock.writeLock().lock();
         try {
-            String node = consistentHash.get(key);
-            KeyValuePair pair = nodeStores.get(node).get(key);
-            if (pair != null) {
-                pair.setValue(value);
-                pair.setExpirationDate(expirationDate);
-                pair.setInsertTimestamp(Instant.now());
-                expirationHeap.offer(new ExpirationEntry(key, expirationDate));
+            List<String> responsibleNodes = getResponsibleNodes(key);
+            KeyValuePair pair = new KeyValuePair(key, value, expirationDate, Instant.now());
+            for (String node : responsibleNodes) {
+                nodeStores.get(node).put(key, pair);
             }
+            expirationHeap.offer(new ExpirationEntry(key, expirationDate));
         } finally {
             lock.writeLock().unlock();
         }
@@ -87,8 +91,10 @@ public class KeyValueStoreService {
     public void delete(String key) {
         lock.writeLock().lock();
         try {
-            String node = consistentHash.get(key);
-            nodeStores.get(node).remove(key);
+            List<String> responsibleNodes = getResponsibleNodes(key);
+            for (String node : responsibleNodes) {
+                nodeStores.get(node).remove(key);
+            }
         } finally {
             lock.writeLock().unlock();
         }
@@ -97,11 +103,11 @@ public class KeyValueStoreService {
     public List<String> getAllKeys() {
         lock.readLock().lock();
         try {
-            List<String> allKeys = new ArrayList<>();
+            Set<String> allKeys = new HashSet<>();
             for (Map<String, KeyValuePair> nodeStore : nodeStores.values()) {
                 allKeys.addAll(nodeStore.keySet());
             }
-            return allKeys;
+            return new ArrayList<>(allKeys);
         } finally {
             lock.readLock().unlock();
         }
@@ -163,11 +169,42 @@ public class KeyValueStoreService {
     }
 
     public Map<String, Integer> getNodeDistribution() {
-        Map<String, Integer> distribution = new HashMap<>();
-        for (Map.Entry<String, Map<String, KeyValuePair>> entry : nodeStores.entrySet()) {
-            distribution.put(entry.getKey(), entry.getValue().size());
+        lock.readLock().lock();
+        try {
+            Map<String, Integer> distribution = new HashMap<>();
+            for (String node : nodes) {
+                distribution.put(node, nodeStores.get(node).size());
+            }
+            return distribution;
+        } finally {
+            lock.readLock().unlock();
         }
-        return distribution;
+    }
+
+    private List<String> getResponsibleNodes(String key) {
+        List<String> responsibleNodes = new ArrayList<>();
+        String primaryNode = consistentHash.get(key);
+        responsibleNodes.add(primaryNode);
+        
+        // Add two more nodes for replication
+        int primaryIndex = nodes.indexOf(primaryNode);
+        for (int i = 1; i <= 2; i++) {
+            int replicaIndex = (primaryIndex + i) % nodes.size();
+            responsibleNodes.add(nodes.get(replicaIndex));
+        }
+        return responsibleNodes;
+    }
+
+    public void simulateNodeFailure(String failedNode) {
+        lock.writeLock().lock();
+        try {
+            nodeStores.remove(failedNode);
+            consistentHash.remove(failedNode);
+            nodes.remove(failedNode);
+            System.out.println("Node " + failedNode + " has failed and been removed from the cluster.");
+        } finally {
+            lock.writeLock().unlock();
+        }
     }
 
     private static class ExpirationEntry implements Comparable<ExpirationEntry> {
