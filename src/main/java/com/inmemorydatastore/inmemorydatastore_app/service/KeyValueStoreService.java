@@ -162,6 +162,14 @@ public class KeyValueStoreService {
         }
     }
 
+    public Map<String, Integer> getNodeDistribution() {
+        Map<String, Integer> distribution = new HashMap<>();
+        for (Map.Entry<String, Map<String, KeyValuePair>> entry : nodeStores.entrySet()) {
+            distribution.put(entry.getKey(), entry.getValue().size());
+        }
+        return distribution;
+    }
+
     private static class ExpirationEntry implements Comparable<ExpirationEntry> {
         String key;
         Instant expirationDate;
