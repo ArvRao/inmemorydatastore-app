@@ -9,6 +9,7 @@ import com.inmemorydatastore.inmemorydatastore_app.service.KeyValueStoreService;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/kv")
@@ -49,6 +50,18 @@ public class KeyValueStoreController {
     public ResponseEntity<List<String>> getAllKeys() {
         List<String> keys = storeService.getAllKeys();
         return new ResponseEntity<>(keys, HttpStatus.OK);
+    }
+
+    @PostMapping("/simulate-failure/{node}")
+    public ResponseEntity<String> simulateNodeFailure(@PathVariable String node) {
+        storeService.simulateNodeFailure(node);
+        return new ResponseEntity<>("Node failure simulated for " + node, HttpStatus.OK);
+    }
+
+    @GetMapping("/distribution")
+    public ResponseEntity<Map<String, Integer>> getNodeDistribution() {
+        Map<String, Integer> distribution = storeService.getNodeDistribution();
+        return new ResponseEntity<>(distribution, HttpStatus.OK);
     }
 
     static class KeyValueRequest {
